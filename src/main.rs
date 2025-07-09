@@ -1,21 +1,13 @@
 use std::error::Error;
-use std::fs::File;
-use std::io::BufReader;
-use clap::builder::Str;
-use clap::Parser;
 use rss::Channel;
 use sqlx::sqlite::SqlitePool;
-use sqlx::Sqlite;
 use std::io;
-use chrono::prelude::*;
 
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
     init_db().await?;
-    let pool = SqlitePool::connect("sqlite:feeds.db").await?;
-    // add_feed(&pool).await?;
-    display_items(&pool).await?;
+    menu().await?;
     Ok(())
 }
 
@@ -28,8 +20,9 @@ async fn parse_xml(xml: &str) -> Result<Channel, Box<dyn Error>> {
     let content: String = fetch_rss(xml).await?;
     let channel: Channel = Channel::read_from(content.as_bytes())?;
     for item in &channel.items {    
-        println!("{}", item.title.as_deref().unwrap_or(""));
+        println!("\n{}", item.title.as_deref().unwrap_or(""));
         println!("{}", item.link.as_deref().unwrap_or(""));
+        println!("");
     }
     Ok(channel)
 }
@@ -90,3 +83,31 @@ async fn display_items(pool: &SqlitePool) -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 
+async fn menu() -> Result<(), Box<dyn Error>>{
+    let pool = SqlitePool::connect("sqlite:feeds.db").await?;
+
+    loop {
+        println!("\nenter 1 to add rss");
+        println!("enter 2 to view feed");
+        println!("enter 3 to exit\n");
+
+        let mut input = String::new();
+
+        io::stdin()
+            .read_line(&mut input)
+            .expect("failed to read line");
+
+        match input.trim() {
+            "1" => add_feed(&pool).await?,
+            "2" => display_items(&pool).await?,
+            "3" => {
+                println!("goodbye");
+                break;
+            }
+            _ => println!("invalid option. enter either 1 to add rss, 2 to view feed, or 3 to exit"),
+        }
+
+    };
+
+    Ok(())
+}

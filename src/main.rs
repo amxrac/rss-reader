@@ -16,9 +16,11 @@ async fn fetch_rss(url: &str) -> Result<String, Box<dyn Error>> {
     Ok(response)
 }
 
-async fn parse_xml(xml: &str) -> Result<Channel, Box<dyn Error>> {
+async fn parse_xml(xml: &str, feed_title: &str) -> Result<Channel, Box<dyn Error>> {
     let content: String = fetch_rss(xml).await?;
     let channel: Channel = Channel::read_from(content.as_bytes())?;
+
+    println!("\n{:?}", feed_title.trim());
     for item in &channel.items {    
         println!("\n{}", item.title.as_deref().unwrap_or(""));
         println!("{}", item.link.as_deref().unwrap_or(""));
@@ -47,23 +49,36 @@ async fn add_feed(pool: &SqlitePool) -> Result<(), Box<dyn Error>> {
     loop {
         url.clear();
 
-        io::stdin()
-            .read_line(&mut url)
-            .expect("failed to read line");
+        io::stdin().read_line(&mut url)?;
+
+        let url = url.trim();
+        if url.is_empty() {
+            println!("url cannot be empty. please try again");
+            continue;
+        }
 
         match validate_rss(&url).await {
             Ok(title) => {
-                sqlx::query("INSERT INTO feeds (title, url, created_at) VALUES (?, ?, ?)")
-                .bind(title)
+                match sqlx::query("INSERT INTO feeds (title, url, created_at) VALUES (?, ?, ?)")
+                .bind(&title)
                 .bind(&url.trim())
                 .bind(chrono::Utc::now().to_rfc3339())
                 .execute(pool)
-                .await?;
-                println!("rss feed added successfully");
-                break;
+                .await {
+                    Ok(_) => {
+                        println!("successfully added {}", title);
+                        break;
+                    }
+                    Err(e) => {
+                        println!("db error: {:?}", e);
+                        println!("please enter a valid url");
+                        continue;
+                    }
+                }
             }
-            Err(err) => {
-                println!("Error adding feed: {}", err);
+            Err(e) => {
+                eprintln!("invalid rss: {:?}", e);
+                println!("please enter a valid url");
                 continue;
             }
         }
@@ -73,12 +88,16 @@ async fn add_feed(pool: &SqlitePool) -> Result<(), Box<dyn Error>> {
 }
 
 async fn display_items(pool: &SqlitePool) -> Result<(), Box<dyn Error>> {
-    let urls: Vec<String> = sqlx::query_scalar("SELECT url FROM feeds")
+    let urls: Vec<(String, String)> = sqlx::query_as("SELECT title, url FROM feeds")
     .fetch_all(pool)
     .await?;
 
-    for url in &urls {
-        parse_xml(url).await?;
+    if urls.is_empty() {
+        println!("\nnothing to display for now. add an rss feed and check back later");
+    }
+
+    for (title, url) in &urls {
+        parse_xml(url, title).await?;
     }
     Ok(())
 }

@@ -13,9 +13,9 @@ use chrono::prelude::*;
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
     init_db().await?;
-    // parse_xml("https://news.ycombinator.com/rss").await?;
     let pool = SqlitePool::connect("sqlite:feeds.db").await?;
-    add_feed(&pool).await?;
+    // add_feed(&pool).await?;
+    display_items(&pool).await?;
     Ok(())
 }
 
@@ -27,11 +27,10 @@ async fn fetch_rss(url: &str) -> Result<String, Box<dyn Error>> {
 async fn parse_xml(xml: &str) -> Result<Channel, Box<dyn Error>> {
     let content: String = fetch_rss(xml).await?;
     let channel: Channel = Channel::read_from(content.as_bytes())?;
-    // for item in &channel.items {    
-    //     println!("{}", item.title.as_deref().unwrap_or(""));
-    //     println!("{}", item.link.as_deref().unwrap_or(""));
-    //     println!("{}", item.pub_date.as_deref().unwrap_or(""));
-    // }
+    for item in &channel.items {    
+        println!("{}", item.title.as_deref().unwrap_or(""));
+        println!("{}", item.link.as_deref().unwrap_or(""));
+    }
     Ok(channel)
 }
 
@@ -52,7 +51,6 @@ async fn add_feed(pool: &SqlitePool) -> Result<(), Box<dyn Error>> {
     println!("enter rss feed url: ");
     let mut url: String = String::new();
 
-
     loop {
         url.clear();
 
@@ -62,18 +60,14 @@ async fn add_feed(pool: &SqlitePool) -> Result<(), Box<dyn Error>> {
 
         match validate_rss(&url).await {
             Ok(title) => {
-                sqlx::query(
-                    r#"
-                    INSERT INTO feeds (title, url, published_at) VALUES (?, ?, ?)
-                    "#
-                )
+                sqlx::query("INSERT INTO feeds (title, url, created_at) VALUES (?, ?, ?)")
                 .bind(title)
                 .bind(&url.trim())
                 .bind(chrono::Utc::now().to_rfc3339())
                 .execute(pool)
                 .await?;
                 println!("rss feed added successfully");
-                break url.trim().to_string();
+                break;
             }
             Err(err) => {
                 println!("Error adding feed: {}", err);
@@ -84,3 +78,15 @@ async fn add_feed(pool: &SqlitePool) -> Result<(), Box<dyn Error>> {
     };
     Ok(())
 }
+
+async fn display_items(pool: &SqlitePool) -> Result<(), Box<dyn Error>> {
+    let urls: Vec<String> = sqlx::query_scalar("SELECT url FROM feeds")
+    .fetch_all(pool)
+    .await?;
+
+    for url in &urls {
+        parse_xml(url).await?;
+    }
+    Ok(())
+}
+
